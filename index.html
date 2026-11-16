@@ -1,0 +1,589 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>네컷 작업실</title>
+<style>
+:root{--ink:#262230;--muted:#625b6a;--accent:#5936bd;--line:#e5deeb}
+*{box-sizing:border-box}
+body{margin:0;background:#f6f3f0;color:var(--ink);font:15px/1.5 system-ui,sans-serif}
+main{max-width:1120px;margin:auto;padding:25px 16px 45px}
+h1{font-size:clamp(30px,5vw,46px);letter-spacing:-.06em;margin:0}
+p{margin:5px 0;color:var(--muted)}
+small,.small{font-size:12px;color:var(--muted)}
+.eyebrow{font-size:11px;letter-spacing:.16em;font-weight:800;color:var(--accent)}
+.grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(320px,375px);gap:16px;align-items:start;margin-top:20px}
+.card{background:white;border:1px solid var(--line);border-radius:17px;overflow:hidden}
+.section,.bar{padding:12px 14px;border-bottom:1px solid var(--line)}
+.section:last-child{border:0}
+.row{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.tools{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.stage{display:grid;place-items:center;padding:18px;background:radial-gradient(#d9d0d9 1px,transparent 1px) 0 0/15px 15px,#eee9ed}
+.board{position:relative;width:min(100%,490px);box-shadow:0 10px 25px #28203626}
+canvas{width:100%;height:auto;display:block}
+.slot{position:absolute;display:grid;place-items:center;padding:0;border:1px dashed #b9adbf;background:none;border-radius:0;color:#534961;touch-action:none;user-select:none}
+.slot.filled{border-color:transparent;cursor:grab}
+.slot.selected{outline:2px solid #8851ef;outline-offset:-2px}
+.slot.over,.slot:hover{background:#995fff1a}
+.handle{display:none;position:absolute;right:0;bottom:0;width:27px;height:27px;background:var(--accent);color:white;border-radius:8px 0 0 0;cursor:nwse-resize;place-items:center}
+.slot.selected.frame-mode .handle{display:grid}
+.slot.frame-mode{cursor:move}
+button,input,select{font:inherit;color:inherit}
+button{cursor:pointer}
+button:disabled{opacity:.48;cursor:default}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #a47bef;outline-offset:2px}
+.btn{padding:6px 9px;background:white;border:1px solid var(--line);border-radius:8px;font-size:13px;font-weight:700}
+.btn:hover:enabled,.btn[aria-pressed="true"]{background:#eee6ff;border-color:#ad93e9}
+.primary{background:var(--accent);color:white;border-color:var(--accent)}
+.primary:hover:enabled{background:#442a9d}
+.thumbs,.numbers,.saves{display:grid;gap:6px;margin-top:8px}
+.thumbs,.numbers{grid-template-columns:repeat(4,minmax(0,1fr))}
+.thumb{position:relative;overflow:hidden;height:40px;text-align:left}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover}
+.thumb span{position:relative;z-index:1;background:#ffffffec;padding:1px 4px;border-radius:4px}
+.thumb[aria-pressed="true"]{outline:2px solid var(--accent)}
+.field{display:grid;grid-template-columns:65px minmax(0,1fr);align-items:center;gap:8px;margin-top:8px;font-size:13px}
+.numbers label{display:grid;gap:3px;font-size:11px;color:var(--muted)}
+input[type=text],input[type=number],select{width:100%;min-width:0;padding:5px 6px;border:1px solid var(--line);border-radius:7px;background:#fcfbfd}
+input[type=range]{width:100%;accent-color:var(--accent)}
+.saves{grid-template-columns:1fr 1fr}.saves .primary{grid-column:1/-1;padding:9px}
+.hint{text-align:center;padding:5px 10px}
+#status{min-height:18px}
+@media(max-width:780px){.grid{grid-template-columns:1fr}.stage{padding:14px}}
+</style>
+</head>
+<body>
+<main>
+  <div class="eyebrow">PHOTO BOOTH</div>
+  <h1>오늘의 네컷</h1>
+  <p>사진 네 장을 담고, 칸 배치와 배경까지 내 취향대로 바꿔보세요.</p>
+
+  <div class="grid">
+    <article class="card">
+      <div class="bar row"><strong>미리보기</strong><span id="count">0 / 4</span></div>
+      <div class="stage">
+        <div class="board" id="board">
+          <canvas id="canvas" aria-label="네컷 사진 미리보기"></canvas>
+          <div id="slots"></div>
+        </div>
+      </div>
+      <p class="hint small" id="hint"></p>
+    </article>
+
+    <aside class="card" aria-label="편집 설정">
+      <section class="section">
+        <div class="row"><strong>01. 사진</strong><button class="btn" id="add">빈 칸에 사진 추가</button></div>
+        <div class="thumbs" id="thumbs"></div>
+        <div class="tools">
+          <button class="btn" id="replace">선택 칸 교체</button>
+          <button class="btn" id="prev">← 앞 칸</button>
+          <button class="btn" id="next">뒤 칸 →</button>
+          <button class="btn" id="remove">비우기</button>
+        </div>
+      </section>
+
+      <section class="section">
+        <strong>02. 칸 배치와 사진 위치</strong>
+        <label class="field">기본 배치
+          <select id="layout">
+            <option value="grid">2×2 정사각형</option>
+            <option value="strip">1×4 세로 포토스트립</option>
+          </select>
+        </label>
+        <div class="tools" role="group" aria-label="드래그 편집 모드">
+          <button class="btn" id="frameMode">칸 이동·크기</button>
+          <button class="btn" id="photoMode">사진 위치·확대</button>
+        </div>
+        <div id="framePanel">
+          <p class="small" id="frameLabel"></p>
+          <div class="numbers">
+            <label>가로 X <input id="x" type="number" min="0" max="100" step=".1"></label>
+            <label>세로 Y <input id="y" type="number" min="0" max="100" step=".1"></label>
+            <label>너비 <input id="w" type="number" min="5" max="100" step=".1"></label>
+            <label>높이 <input id="h" type="number" min="5" max="100" step=".1"></label>
+          </div>
+          <div class="tools"><button class="btn" id="reset">이 칸 원래대로</button></div>
+        </div>
+        <div id="photoPanel" hidden>
+          <label class="field">사진 확대 <input id="zoom" type="range" min="1" max="3" step=".01" value="1"></label>
+          <p class="small">사진만 움직여요. 칸 자체의 위치와 크기는 유지돼요.</p>
+        </div>
+      </section>
+
+      <section class="section">
+        <strong>03. 배경과 문구</strong>
+        <label class="field">배경 색 <input id="color" type="color"></label>
+        <div class="tools">
+          <button class="btn" id="bgAdd">배경 사진 넣기</button>
+          <button class="btn" id="bgRemove">배경 사진 빼기</button>
+        </div>
+        <label class="field">배경 표시
+          <select id="bgFit">
+            <option value="cover">꽉 채우기</option>
+            <option value="contain">사진 전체 보이기</option>
+          </select>
+        </label>
+        <label class="field">문구 <input id="caption" type="text" maxlength="38"></label>
+      </section>
+
+      <section class="section">
+        <strong>04. 저장과 이어서 편집</strong>
+        <div class="saves">
+          <button class="btn primary" id="png">완성 사진 PNG 저장</button>
+          <button class="btn" id="save">편집본 저장</button>
+          <button class="btn" id="open">편집본 열기</button>
+        </div>
+        <p class="small">PNG는 공유용, 편집본 JSON은 다시 수정할 때 써요.</p>
+        <p class="small" id="status" role="status"></p>
+      </section>
+    </aside>
+  </div>
+
+  <input id="photoFile" type="file" accept="image/*" hidden>
+  <input id="bgFile" type="file" accept="image/*" hidden>
+  <input id="projectFile" type="file" accept=".json,application/json" hidden>
+</main>
+
+<script>
+'use strict';
+
+const $ = id => document.getElementById(id);
+const canvas = $('canvas'), ctx = canvas.getContext('2d');
+const keys = ['x','y','w','h'];
+const empty = () => [null,null,null,null];
+const clamp = (n,a,b) => Math.min(b,Math.max(a,n));
+const tell = text => { $('status').textContent = text; };
+const validImage = s => typeof s === 'string' &&
+  /^data:image\/(?:jpeg|png|webp);base64,/i.test(s);
+
+let project = {
+  version:1, layout:'grid', color:'#fffaf1', caption:'우리의 네컷',
+  slots:empty(), frames:{grid:empty(),strip:empty()},
+  background:null, backgroundFit:'cover'
+};
+let images = empty(), bgImage = null;
+let active = 0, mode = 'frame', busy = false, drag = null, targets = [];
+let dirty = false, revision = 0, timer, dbReady;
+const slotButtons = [], thumbButtons = [];
+
+function geometry() {
+  const strip = project.layout === 'strip';
+  const w = strip ? 750 : 1440, h = strip ? 2280 : 1440;
+  const defaults = empty().map((_,i) => strip
+    ? {x:40,y:40+i*525,w:670,h:500}
+    : {x:52+i%2*680,y:52+Math.floor(i/2)*625,w:656,h:600});
+  return {w,h,width:strip?205:490,captionY:strip?2194:1344,font:strip?46:56,
+    frames:defaults.map((b,i) => project.frames[project.layout][i] ||
+      {x:b.x/w*100,y:b.y/h*100,w:b.w/w*100,h:b.h/h*100})};
+}
+
+function pixelBox(f,g) {
+  return {x:f.x*g.w/100,y:f.y*g.h/100,w:f.w*g.w/100,h:f.h*g.h/100};
+}
+
+function crop(im,b,s) {
+  const scale = Math.max(b.w/im.naturalWidth,b.h/im.naturalHeight)*s.z;
+  const w = im.naturalWidth*scale, h = im.naturalHeight*scale;
+  return {w,h,x:b.x+(b.w-w)*(s.x+1)/2,y:b.y+(b.h-h)*(s.y+1)/2};
+}
+
+function draw(includeEmpty=true) {
+  const g = geometry();
+  if (canvas.width !== g.w || canvas.height !== g.h) {
+    canvas.width = g.w;
+    canvas.height = g.h;
+  }
+  ctx.fillStyle = project.color;
+  ctx.fillRect(0,0,g.w,g.h);
+  if (bgImage) {
+    const sx = g.w/bgImage.naturalWidth, sy = g.h/bgImage.naturalHeight;
+    const s = project.backgroundFit === 'contain' ? Math.min(sx,sy) : Math.max(sx,sy);
+    const w = bgImage.naturalWidth*s, h = bgImage.naturalHeight*s;
+    ctx.drawImage(bgImage,(g.w-w)/2,(g.h-h)/2,w,h);
+  }
+  g.frames.forEach((f,i) => {
+    const b = pixelBox(f,g), im = images[i];
+    if (!im) {
+      if (includeEmpty) {
+        ctx.fillStyle = '#eee9f1df';
+        ctx.fillRect(b.x,b.y,b.w,b.h);
+      }
+      return;
+    }
+    const p = crop(im,b,project.slots[i]);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(b.x,b.y,b.w,b.h);
+    ctx.clip();
+    ctx.drawImage(im,p.x,p.y,p.w,p.h);
+    ctx.restore();
+  });
+  if (!project.caption.trim()) return;
+  const rgb = project.color.slice(1).match(/../g).map(s=>parseInt(s,16));
+  ctx.font = 'bold '+g.font+'px system-ui,sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = bgImage || rgb[0]*.299+rgb[1]*.587+rgb[2]*.114<145
+    ? '#fff' : '#292532';
+  if (bgImage) {
+    ctx.strokeStyle = '#262230';
+    ctx.lineWidth = 5;
+    ctx.lineJoin = 'round';
+    ctx.strokeText(project.caption,g.w/2,g.captionY,g.w-90);
+  }
+  ctx.fillText(project.caption,g.w/2,g.captionY,g.w-90);
+}
+
+function place() {
+  const g = geometry();
+  $('board').style.width = 'min(100%, '+g.width+'px)';
+  g.frames.forEach((f,i) => {
+    const b = slotButtons[i];
+    Object.assign(b.style,{left:f.x+'%',top:f.y+'%',width:f.w+'%',height:f.h+'%',
+      zIndex:mode==='frame' && i===active ? '5' : String(i+1)});
+  });
+  for (const k of keys) {
+    if (document.activeElement !== $(k)) $(k).value = +g.frames[active][k].toFixed(1);
+  }
+}
+
+function sync() {
+  const n = images.filter(Boolean).length;
+  $('count').textContent = n+' / 4';
+  $('layout').value = project.layout;
+  $('color').value = project.color;
+  $('caption').value = project.caption;
+  $('bgFit').value = project.backgroundFit;
+  $('zoom').value = project.slots[active]?.z ?? 1;
+  $('framePanel').hidden = mode !== 'frame';
+  $('photoPanel').hidden = mode !== 'photo';
+  $('frameMode').setAttribute('aria-pressed',mode==='frame');
+  $('photoMode').setAttribute('aria-pressed',mode==='photo');
+  $('frameLabel').textContent = (active+1)+'번 칸 · 전체 캔버스 기준 %';
+  $('hint').textContent = mode==='frame'
+    ? '칸을 드래그해 이동하고, 보라색 손잡이로 크기를 바꾸세요.'
+    : '칸 안에서 사진을 드래그하고, 확대 슬라이더로 구도를 맞추세요.';
+  for (const id of ['add','replace','bgAdd','open','save',...keys]) $(id).disabled = busy;
+  for (const id of ['zoom','remove']) $(id).disabled = busy || !images[active];
+  $('prev').disabled = busy || !images[active] || active===0;
+  $('next').disabled = busy || !images[active] || active===3;
+  $('reset').disabled = busy || !project.frames[project.layout][active];
+  $('bgRemove').disabled = $('bgFit').disabled = busy || !bgImage;
+  $('png').disabled = busy || n!==4;
+  for (let i=0;i<4;i++) {
+    const b = slotButtons[i], t = thumbButtons[i];
+    b.className = 'slot'+(images[i]?' filled':'')+(i===active?' selected':'')+
+      (mode==='frame'?' frame-mode':'');
+    b.firstChild.textContent = images[i] ? '' : (i+1)+'번';
+    b.setAttribute('aria-label',(i+1)+'번 칸');
+    t.setAttribute('aria-pressed',i===active);
+    const img = t.querySelector('img');
+    if (images[i]) img.src = images[i].src;
+    else img.removeAttribute('src');
+    img.hidden = !images[i];
+  }
+  place();
+  draw();
+}
+
+function setFrame(i,f) { project.frames[project.layout][i] = f; }
+
+for (let i=0;i<4;i++) {
+  const thumb = document.createElement('button');
+  thumb.className = 'btn thumb';
+  thumb.setAttribute('aria-label',(i+1)+'번 칸 선택');
+  thumb.innerHTML = '<img alt="" hidden><span>'+(i+1)+'</span>';
+  thumb.onclick = () => { active=i; sync(); };
+  $('thumbs').append(thumb);
+  thumbButtons.push(thumb);
+
+  const b = document.createElement('button');
+  b.innerHTML = '<span></span><span class="handle" aria-hidden="true">↘</span>';
+  b.onclick = () => {
+    if (busy) return;
+    active=i; sync();
+    if (mode==='photo' && !images[i]) choose([i]);
+  };
+  b.onpointerdown = e => {
+    if (busy || drag || !e.isPrimary || e.button!==0) return;
+    const fromHandle = e.target.classList.contains('handle');
+    active=i; sync();
+    if (mode==='photo' && !images[i]) return;
+    const g=geometry(), f={...g.frames[i]}, rect=canvas.getBoundingClientRect();
+    drag={id:e.pointerId,i,x:e.clientX,y:e.clientY,rect,f,
+      kind:mode==='photo'?'photo':fromHandle?'resize':'move',moved:false};
+    if (drag.kind==='photo') {
+      const s=project.slots[i], box=pixelBox(f,g), p=crop(images[i],box,s);
+      drag.s={...s};
+      drag.dx=(p.w-box.w)*rect.width/g.w/2;
+      drag.dy=(p.h-box.h)*rect.height/g.h/2;
+    }
+    b.setPointerCapture(e.pointerId);
+  };
+  b.onpointermove = e => {
+    const d=drag;
+    if (!d || d.id!==e.pointerId || d.i!==i) return;
+    const dx=e.clientX-d.x, dy=e.clientY-d.y;
+    if (!d.moved && Math.abs(dx)+Math.abs(dy)<3) return;
+    d.moved=true;
+    const x=dx/d.rect.width*100, y=dy/d.rect.height*100, f={...d.f};
+    if (d.kind==='move') {
+      f.x=clamp(f.x+x,0,100-f.w); f.y=clamp(f.y+y,0,100-f.h);
+      setFrame(i,f); place();
+    } else if (d.kind==='resize') {
+      f.w=clamp(f.w+x,5,100-f.x); f.h=clamp(f.h+y,5,100-f.y);
+      setFrame(i,f); place();
+    } else {
+      const s=project.slots[i];
+      if (d.dx>0) s.x=clamp(d.s.x-dx/d.dx,-1,1);
+      if (d.dy>0) s.y=clamp(d.s.y-dy/d.dy,-1,1);
+    }
+    draw();
+  };
+  b.onlostpointercapture = e => {
+    if (!drag || drag.id!==e.pointerId || drag.i!==i) return;
+    const moved=drag.moved;
+    drag=null;
+    if (moved) { sync(); autosave(); }
+  };
+  b.ondragover = e => {
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault(); b.classList.add('over');
+    }
+  };
+  b.ondragleave = () => b.classList.remove('over');
+  b.ondrop = e => {
+    e.preventDefault(); b.classList.remove('over');
+    addPhotos([...e.dataTransfer.files],[i]);
+  };
+  $('slots').append(b);
+  slotButtons.push(b);
+}
+
+for (const k of keys) {
+  $(k).onchange = () => {
+    const f={...geometry().frames[active]}, n=$(k).valueAsNumber;
+    if (Number.isFinite(n)) {
+      if (k==='x') f.x=clamp(n,0,100-f.w);
+      if (k==='y') f.y=clamp(n,0,100-f.h);
+      if (k==='w') f.w=clamp(n,5,100-f.x);
+      if (k==='h') f.h=clamp(n,5,100-f.y);
+      setFrame(active,f);
+      autosave();
+    }
+    sync();
+    $(k).value=+geometry().frames[active][k].toFixed(1);
+  };
+  $(k).onkeydown = e => { if (e.key==='Enter') e.target.blur(); };
+}
+
+$('frameMode').onclick = () => { mode='frame'; sync(); };
+$('photoMode').onclick = () => { mode='photo'; sync(); };
+$('reset').onclick = () => { setFrame(active,null); sync(); autosave(); };
+$('layout').onchange = e => { project.layout=e.target.value; sync(); autosave(); };
+$('zoom').oninput = e => {
+  if (!project.slots[active]) return;
+  project.slots[active].z=+e.target.value; draw(); autosave();
+};
+for (const k of ['caption','color']) {
+  $(k).oninput = e => { project[k]=e.target.value; draw(); autosave(); };
+}
+$('bgFit').onchange = e => { project.backgroundFit=e.target.value; draw(); autosave(); };
+
+function imageFrom(src) {
+  return new Promise((resolve,reject) => {
+    const im=new Image();
+    im.onload=()=>resolve(im); im.onerror=()=>reject(Error('image'));
+    im.src=src;
+  });
+}
+
+async function readPhoto(file,maxEdge=2400) {
+  const url=URL.createObjectURL(file);
+  try {
+    const im=await imageFrom(url), temp=document.createElement('canvas');
+    const s=Math.min(1,maxEdge/Math.max(im.naturalWidth,im.naturalHeight));
+    temp.width=Math.max(1,Math.round(im.naturalWidth*s));
+    temp.height=Math.max(1,Math.round(im.naturalHeight*s));
+    const c=temp.getContext('2d');
+    c.fillStyle='#fff'; c.fillRect(0,0,temp.width,temp.height);
+    c.drawImage(im,0,0,temp.width,temp.height);
+    const data=temp.toDataURL('image/jpeg',.94);
+    return [data,await imageFrom(data)];
+  } finally { URL.revokeObjectURL(url); }
+}
+
+function choose(indices,multiple=false) {
+  if (busy) return;
+  if (!indices.length) return tell('바꿀 칸을 선택하고 ‘선택 칸 교체’를 눌러주세요.');
+  targets=indices;
+  $('photoFile').multiple=multiple;
+  $('photoFile').click();
+}
+
+async function addPhotos(files,indices) {
+  if (busy || !files.length || !indices.length) return;
+  busy=true; sync();
+  let ok=0, failed=0;
+  for (let j=0;j<Math.min(files.length,indices.length);j++) {
+    try {
+      const i=indices[j], [data,im]=await readPhoto(files[j]);
+      images[i]=im; project.slots[i]={data,x:0,y:0,z:1};
+      active=i; ok++;
+    } catch { failed++; }
+  }
+  busy=false; sync();
+  if (ok) autosave(false);
+  tell([
+    ok ? ok+'장 적용했어요.' : '',
+    failed ? failed+'장은 읽지 못했어요. JPG·PNG·WebP로 다시 선택해 주세요.' : '',
+    files.length>indices.length ? '빈 칸에 들어가는 만큼만 추가했어요.' : ''
+  ].filter(Boolean).join(' '));
+}
+
+$('add').onclick = () => choose(images.flatMap((im,i)=>im?[]:[i]),true);
+$('replace').onclick = () => choose([active]);
+$('photoFile').onchange = e => {
+  const files=[...e.target.files]; e.target.value='';
+  addPhotos(files,targets);
+};
+$('remove').onclick = () => {
+  images[active]=null; project.slots[active]=null; sync(); autosave();
+};
+function swap(to) {
+  if (busy || to<0 || to>3 || !images[active]) return;
+  [images[active],images[to]]=[images[to],images[active]];
+  [project.slots[active],project.slots[to]]=[project.slots[to],project.slots[active]];
+  active=to; sync(); autosave();
+}
+$('prev').onclick = () => swap(active-1);
+$('next').onclick = () => swap(active+1);
+
+$('bgAdd').onclick = () => $('bgFile').click();
+$('bgRemove').onclick = () => {
+  project.background=null; bgImage=null; sync(); autosave();
+};
+$('bgFile').onchange = async e => {
+  const file=e.target.files[0]; e.target.value='';
+  if (!file || busy) return;
+  busy=true; sync();
+  try {
+    [project.background,bgImage]=await readPhoto(file,2600);
+    autosave(false); tell('배경 사진을 적용했어요.');
+  } catch { tell('배경을 읽지 못했어요. JPG·PNG·WebP로 다시 선택해 주세요.'); }
+  finally { busy=false; sync(); }
+};
+
+function download(blob,name) {
+  const url=URL.createObjectURL(blob), a=document.createElement('a');
+  a.href=url; a.download=name; document.body.append(a);
+  a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),30000);
+}
+$('png').onclick = () => {
+  if (!images.every(Boolean)) return;
+  draw(false);
+  canvas.toBlob(blob => {
+    if (!blob) return tell('PNG를 만들지 못했어요.');
+    download(blob,'fourcut.png'); tell('PNG 다운로드를 시작했어요.');
+  },'image/png');
+};
+$('save').onclick = () => {
+  download(new Blob([JSON.stringify(project)],{type:'application/json'}),'fourcut-project.json');
+  dirty=false; tell('편집본 다운로드를 시작했어요.');
+};
+
+function safeFrame(f) {
+  if (!f || !keys.every(k=>Number.isFinite(f[k]))) return null;
+  const w=clamp(f.w,5,100), h=clamp(f.h,5,100);
+  return {x:clamp(f.x,0,100-w),y:clamp(f.y,0,100-h),w,h};
+}
+async function decode(raw) {
+  if (!raw || raw.version!==1 || !['grid','strip'].includes(raw.layout) ||
+      typeof raw.caption!=='string' || typeof raw.color!=='string' ||
+      !/^#[a-f0-9]{6}$/i.test(raw.color) ||
+      !Array.isArray(raw.slots) || raw.slots.length!==4) throw Error('format');
+  const data={
+    version:1, layout:raw.layout, color:raw.color, caption:raw.caption.slice(0,38),
+    background:validImage(raw.background)?raw.background:null,
+    backgroundFit:raw.backgroundFit==='contain'?'contain':'cover',
+    frames:{
+      grid:empty().map((_,i)=>safeFrame(raw.frames?.grid?.[i])),
+      strip:empty().map((_,i)=>safeFrame(raw.frames?.strip?.[i]))
+    },
+    slots:raw.slots.map(s=>{
+      if (s===null) return null;
+      if (!s || !validImage(s.data)) throw Error('image');
+      return {data:s.data,x:clamp(Number(s.x)||0,-1,1),
+        y:clamp(Number(s.y)||0,-1,1),z:clamp(Number(s.z)||1,1,3)};
+    })
+  };
+  const decoded=await Promise.all(data.slots.map(s=>s?imageFrom(s.data):null));
+  const background=data.background?await imageFrom(data.background):null;
+  return [data,decoded,background];
+}
+
+$('open').onclick = () => $('projectFile').click();
+$('projectFile').onchange = async e => {
+  const file=e.target.files[0]; e.target.value='';
+  if (!file || busy) return;
+  if (dirty && !confirm('현재 작업 대신 이 편집본을 열까요? 현재 작업을 따로 보관하려면 먼저 ‘편집본 저장’을 눌러주세요.')) return;
+  busy=true; sync();
+  try {
+    if (file.size>60*1024*1024) throw Error('size');
+    [project,images,bgImage]=await decode(JSON.parse(await file.text()));
+    active=0; autosave(false,false); tell('편집본을 열었어요.');
+  } catch { tell('편집본을 열지 못했어요. 네컷 작업실에서 저장한 JSON 파일인지 확인해 주세요.'); }
+  finally { busy=false; sync(); }
+};
+
+function openDB() {
+  return new Promise((resolve,reject)=>{
+    const q=indexedDB.open('fourcutStudio',1);
+    q.onupgradeneeded=()=>q.result.createObjectStore('drafts');
+    q.onsuccess=()=>resolve(q.result);
+    q.onerror=()=>reject(q.error);
+  });
+}
+function autosave(show=true,markDirty=true) {
+  dirty=markDirty;
+  const rev=++revision;
+  clearTimeout(timer);
+  timer=setTimeout(async()=>{
+    try {
+      const db=await dbReady;
+      if (rev!==revision) return;
+      const tx=db.transaction('drafts','readwrite');
+      tx.objectStore('drafts').put(project,'last');
+      await new Promise((ok,no)=>{
+        tx.oncomplete=ok; tx.onerror=()=>no(tx.error); tx.onabort=()=>no(tx.error);
+      });
+      if (show && rev===revision) tell('이 브라우저에 자동 저장했어요.');
+    } catch {
+      if (rev===revision) tell('자동 저장이 안 됐어요. ‘편집본 저장’을 사용해 주세요.');
+    }
+  },150);
+}
+
+sync();
+dbReady=openDB();
+(async()=>{
+  try {
+    const db=await dbReady;
+    const raw=await new Promise((ok,no)=>{
+      const q=db.transaction('drafts').objectStore('drafts').get('last');
+      q.onsuccess=()=>ok(q.result); q.onerror=()=>no(q.error);
+    });
+    if (!raw || revision || busy) return;
+    const restored=await decode(raw);
+    if (revision || busy) return;
+    [project,images,bgImage]=restored;
+    dirty=true; sync(); tell('마지막 작업을 불러왔어요.');
+  } catch {
+    if (!revision) tell('자동 복원이 안 되면 ‘편집본 열기’를 사용해 주세요.');
+  }
+})();
+</script>
+</body>
+</html>
